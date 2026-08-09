@@ -1,5 +1,107 @@
-import React,{useState}from'react';import{createRoot}from'react-dom/client';import'./style.css';
-const API=import.meta.env.VITE_BACKEND_URL||'http://localhost:8000';const CID=import.meta.env.VITE_CANDIDATE_ID||'priya.sharma@gmail.com';
-function sample(n=250){const kinds=['RFP for analytics platform','Quick demo request','Sponsorship deadline tomorrow','Invoice payment overdue','Reseller partnership','Out of Office','B2B Growth Weekly'];return Array.from({length:n},(_,i)=>({email_id:`em_${String(i+1).padStart(5,'0')}`,thread_id:`th_${String(Math.floor(i/2)+1).padStart(4,'0')}`,message_index:i%2,from_name:['Suresh Kulkarni','Ankit Bose','Nandita Reddy','Divya Shah'][i%4],from_email:`person${i}@example.com`,to:'sales@company.com',cc:[],subject:kinds[i%kinds.length],body:[`Tender for enterprise software. Budget Rs. ${12+i} lakhs. Last date 12 Aug 2026.`,`Can we get a demo next week? Nothing urgent.`,`Gold sponsorship for India SaaS Summit is ₹4,00,000. Need confirmation by tomorrow EOD.`,`Invoice INV-${i} for Rs. 1,18,000 incl GST is overdue.`,`We want to explore reseller or technology integration partnership.`,`I am out of office until 14th August with limited access.`,`Issue #212. Unsubscribe`][i%7],received_at:'2026-08-01T09:14:22+05:30',attachments:[],is_reply:i%2===1}))}
-function App(){const[txt,setTxt]=useState('');const[emails,setEmails]=useState([]);const[res,setRes]=useState(null);const[q,setQ]=useState('');const[msgs,setMsgs]=useState([]);function parse(){try{const v=JSON.parse(txt);setEmails(Array.isArray(v)?v:v.emails||[])}catch(e){alert('Invalid JSON: '+e.message)}}async function ingest(){const r=await fetch(API+'/ingest',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({candidate_id:CID,emails})});setRes(await r.json())}async function ask(){const r=await fetch(API+'/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({candidate_id:CID,query:q})});const a=await r.json();setMsgs([...msgs,{q,a}]);setQ('')}return <main><h1>Sales Inbox → Task Router</h1><p>Candidate: <b>{CID}</b>. Backend: <code>{API}</code></p><textarea value={txt} onChange={e=>setTxt(e.target.value)} placeholder="Paste inbox JSON array or { emails: [...] }"/><div><button onClick={()=>{const s=sample();setTxt(JSON.stringify(s,null,2));setEmails(s)}}>Generate 250 sample emails</button><button onClick={parse}>Render table first</button><button disabled={!emails.length} onClick={ingest}>Route displayed batch</button></div>{emails.length>0&&<><h2>Raw pasted batch ({emails.length})</h2><table><thead><tr>{['from_name','from_email','subject','received_at','thread_id','body'].map(h=><th>{h}</th>)}</tr></thead><tbody>{emails.map(e=><tr key={e.email_id}><td>{e.from_name||'—'}</td><td>{e.from_email}</td><td>{e.subject}</td><td>{e.received_at}</td><td>{e.thread_id}</td><td>{(e.body||'').slice(0,120)}</td></tr>)}</tbody></table></>}{res&&<pre>{JSON.stringify(res,null,2)}</pre>}<section><h2>Ask about processed data</h2><input value={q} onChange={e=>setQ(e.target.value)} placeholder="How many marketing versus RFP emails?" onKeyDown={e=>{if(e.key==='Enter')ask()}}/><button onClick={ask}>Ask</button>{msgs.map((m,i)=><div className="msg" key={i}><b>You:</b> {m.q}<br/><b>Router:</b> {m.a.answer}<pre>{JSON.stringify(m.a.supporting_data,null,2)}</pre></div>)}</section></main>}
-createRoot(document.getElementById('root')).render(<App/>);
+import React, { useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import './style.css';
+
+const API = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+const DEFAULT_CANDIDATE_ID = import.meta.env.VITE_CANDIDATE_ID || '';
+
+function sample(n = 250) {
+  const kinds = ['RFP for analytics platform', 'Quick demo request', 'Sponsorship deadline tomorrow', 'Invoice payment overdue', 'Reseller partnership', 'Out of Office', 'B2B Growth Weekly'];
+  const bodies = [
+    'Tender for enterprise software. Budget Rs. 25 lakhs. Last date 12 Aug 2026.',
+    'Can we get a demo next week? Nothing urgent.',
+    'Gold sponsorship for India SaaS Summit is ₹4,00,000. Need confirmation by tomorrow EOD.',
+    'Invoice INV-2026 for Rs. 1,18,000 incl GST is overdue.',
+    'We want to explore reseller or technology integration partnership.',
+    'I am out of office until 14th August with limited access.',
+    'Issue #212. Unsubscribe',
+  ];
+  return Array.from({ length: n }, (_, i) => ({
+    email_id: `em_${String(i + 1).padStart(5, '0')}`,
+    thread_id: `th_${String(Math.floor(i / 2) + 1).padStart(4, '0')}`,
+    message_index: i % 2,
+    from_name: ['Suresh Kulkarni', 'Ankit Bose', 'Nandita Reddy', 'Divya Shah'][i % 4],
+    from_email: `person${i}@example.com`,
+    to: 'sales@company.com',
+    cc: [],
+    subject: kinds[i % kinds.length],
+    body: bodies[i % bodies.length],
+    received_at: '2026-08-01T09:14:22+05:30',
+    attachments: [],
+    is_reply: i % 2 === 1,
+  }));
+}
+
+function App() {
+  const [candidateId, setCandidateId] = useState(DEFAULT_CANDIDATE_ID);
+  const [txt, setTxt] = useState('');
+  const [emails, setEmails] = useState([]);
+  const [res, setRes] = useState(null);
+  const [q, setQ] = useState('');
+  const [msgs, setMsgs] = useState([]);
+
+  function cleanCandidateId() {
+    return candidateId.trim().toLowerCase();
+  }
+
+  function parse() {
+    try {
+      const v = JSON.parse(txt);
+      setEmails(Array.isArray(v) ? v : v.emails || []);
+    } catch (e) {
+      alert(`Invalid JSON: ${e.message}`);
+    }
+  }
+
+  async function ingest() {
+    const cid = cleanCandidateId();
+    if (!cid) return alert('Set your real candidate_id email first.');
+    const r = await fetch(`${API}/ingest`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ candidate_id: cid, emails }),
+    });
+    setRes(await r.json());
+  }
+
+  async function ask() {
+    const cid = cleanCandidateId();
+    if (!cid) return alert('Set your real candidate_id email first.');
+    const r = await fetch(`${API}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ candidate_id: cid, query: q }),
+    });
+    const a = await r.json();
+    setMsgs([...msgs, { q, a }]);
+    setQ('');
+  }
+
+  return <main>
+    <h1>Sales Inbox → Task Router</h1>
+    <p>Backend: <code>{API}</code></p>
+    <label>candidate_id email<br />
+      <input value={candidateId} onChange={e => setCandidateId(e.target.value)} placeholder="your.real.email@example.com" />
+    </label>
+    <textarea value={txt} onChange={e => setTxt(e.target.value)} placeholder="Paste inbox JSON array or { emails: [...] }" />
+    <div>
+      <button onClick={() => { const s = sample(); setTxt(JSON.stringify(s, null, 2)); setEmails(s); }}>Generate 250 sample emails</button>
+      <button onClick={parse}>Render table first</button>
+      <button disabled={!emails.length} onClick={ingest}>Route displayed batch</button>
+    </div>
+    {emails.length > 0 && <>
+      <h2>Raw pasted batch ({emails.length})</h2>
+      <table><thead><tr>{['from_name', 'from_email', 'subject', 'received_at', 'thread_id', 'body'].map(h => <th key={h}>{h}</th>)}</tr></thead><tbody>
+        {emails.map(e => <tr key={e.email_id}><td>{e.from_name || '—'}</td><td>{e.from_email}</td><td>{e.subject}</td><td>{e.received_at}</td><td>{e.thread_id}</td><td>{(e.body || '').slice(0, 120)}</td></tr>)}
+      </tbody></table>
+    </>}
+    {res && <pre>{JSON.stringify(res, null, 2)}</pre>}
+    <section><h2>Ask about processed data</h2>
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder="How many marketing versus RFP emails?" onKeyDown={e => { if (e.key === 'Enter') ask(); }} />
+      <button onClick={ask}>Ask</button>
+      {msgs.map((m, i) => <div className="msg" key={i}><b>You:</b> {m.q}<br /><b>Router:</b> {m.a.answer}<pre>{JSON.stringify(m.a.supporting_data, null, 2)}</pre></div>)}
+    </section>
+  </main>;
+}
+
+createRoot(document.getElementById('root')).render(<App />);

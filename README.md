@@ -1,11 +1,11 @@
 # Sales Inbox → Task Router
 
-**candidate_id:** `priya.sharma@gmail.com`  
+**candidate_id:** `replace.with.your.real.email@example.com`  
 **Backend URL:** `https://your-backend.example.com`  
 **Frontend URL:** `https://your-frontend.example.com`  
 **Public GitHub repo:** `https://github.com/your-user/sales-inbox-router`
 
-> Replace the placeholder URLs above with the deployed backend, deployed frontend, and public GitHub repository URLs before submission. Keep the `candidate_id` byte-identical everywhere: README, frontend requests, backend requests, and submission form.
+> Replace the placeholder URLs above with the deployed backend, deployed frontend, and public GitHub repository URLs before submission. Before submission, replace `replace.with.your.real.email@example.com` with your real email everywhere and keep the `candidate_id` byte-identical across README, `.env`, frontend requests, backend requests, and the submission form.
 
 ## Why this exists
 
@@ -88,6 +88,8 @@ The chat flow is deliberately grounded:
 5. The response includes both a human-readable `answer` and machine-checkable `supporting_data`.
 
 If the user asks for an unsupported action, such as sending an email, the chat endpoint refuses. If the user asks for a category with zero matches, it returns zero instead of inventing activity.
+
+When `GEMINI_API_KEY` is configured, `/api/chat` asks Gemini to rephrase the already-computed draft answer. Gemini receives the SQL-backed `supporting_data` and strict instructions not to add or change numbers; if the Gemini call fails or no key is present, the backend returns the deterministic draft answer.
 
 
 ## Whole agentic flow diagram
@@ -201,12 +203,14 @@ Copy `.env.example` to `.env` and update values as needed.
 
 | Variable | Required | Purpose |
 |---|---:|---|
-| `CANDIDATE_ID` | Yes | Submission identity. Must remain `priya.sharma@gmail.com` unless you intentionally change it everywhere. |
+| `CANDIDATE_ID` | Yes | Submission identity. Replace the example value with your real email and use the exact same value everywhere. |
 | `DATABASE_URL` | Yes | SQLite path locally, or another persistent database URL in deployment. |
 | `GEMINI_API_KEY` | No for this deterministic baseline | Reserved for future LLM phrasing/classification. Never expose it to browser JavaScript. |
 | `GEMINI_MODEL` | No | Future Gemini model selection. |
 | `FRONTEND_ORIGIN` | No | Frontend origin for production CORS tightening. |
 | `BACKEND_URL` | No | Backend base URL used in deployment notes. |
+| `VITE_CANDIDATE_ID` | Yes for frontend deployment | Same real email as `CANDIDATE_ID`; Vite exposes only this public identifier, not secrets. |
+| `VITE_BACKEND_URL` | Yes for frontend deployment | Public backend URL used by the browser. |
 
 ## Testing
 
@@ -229,7 +233,7 @@ Before submitting:
 - Deploy the backend publicly over HTTPS.
 - Deploy the frontend publicly over HTTPS.
 - Update the Backend URL, Frontend URL, and Public GitHub repo at the top of this README.
-- Confirm `GET /health`, `GET /users`, `GET /tasks?candidate_id=priya.sharma@gmail.com`, `POST /ingest`, and `POST /api/chat` respond on the same backend base URL.
+- Confirm `GET /health`, `GET /users`, `GET /tasks?candidate_id=<your-real-email>`, `POST /ingest`, and `POST /api/chat` respond on the same backend base URL.
 - Keep `.env` and any API keys out of git.
 
 ## What I would improve next

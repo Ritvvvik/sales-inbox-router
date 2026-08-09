@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json, uuid
+import json, os, uuid
 from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -8,12 +8,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .db import connect, init_db
+from .gemini import phrase_answer
 from .models import ASSIGNEES, CATEGORIES, PRIORITIES, ChatRequest, IngestRequest, TaskCreate, TaskPatch
 from .roster import TEAM
 from .routing import route_email
 
 app = FastAPI(title="Sales Inbox Router")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+frontend_origin = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173").strip()
+app.add_middleware(CORSMiddleware, allow_origins=[frontend_origin], allow_methods=["*"], allow_headers=["*"])
 init_db()
 
 def now(): return datetime.now(timezone.utc).isoformat()
@@ -124,32 +126,42 @@ def compute_stats(cid: str):
         processed=con.execute("SELECT COUNT(*) c FROM decisions WHERE candidate_id=?",(cid,)).fetchone()["c"]
         skipped=con.execute("SELECT COUNT(*) c FROM decisions WHERE candidate_id=? AND action='skip'",(cid,)).fetchone()["c"]
         by_cat={r["category"] or "skipped":r["c"] for r in con.execute("SELECT COALESCE(category,'skipped') category, COUNT(*) c FROM decisions WHERE candidate_id=? GROUP BY COALESCE(category,'skipped')",(cid,))}
-        return {"processed":processed,"created":con.execute("SELECT COUNT(*) c FROM tasks WHERE candidate_id=?",(cid,)).fetchone()["c"],"updated":con.execute("SELECT COUNT(*) c FROM update_events WHERE candidate_id=?",(cid,)).fetchone()["c"],"skipped":skipped,"spurious_flagged":0,"by_category":by_cat}
+        return {"processed":processed,"created":con.execute("SELECT COUNT(*) c FROM tasks WHERE candidate_id=?",(cid,)).fetchone()["c"],"updated":con.execute("SELECT COUNT(*) c FROM update_events WHERE candidate_id=?",(cid,)).fetchone()["c"],"skipped":skipped,"spurious_flagged":None,"spurious_note":"Not tracked without human/eval labels; skipped noise is tracked separately.","by_category":by_cat}
 
 @app.post("/api/chat")
 def chat(req: ChatRequest):
     q=req.query.lower(); cid=req.candidate_id
+
+    def respond(answer: str, supporting_data: dict):
+        return {"answer": phrase_answer(req.query, answer, supporting_data), "supporting_data": supporting_data}
+
     with connect() as con:
-        if any(w in q for w in ["send ", "email ", "delete", "assign"]): return {"answer":"I can answer questions about processed inbox data, but I cannot send emails or take external actions.","supporting_data":{}}
-        if "gst refund" in q: return {"answer":"Zero processed emails were classified as GST refund requests.","supporting_data":{"gst_refund_count":0}}
+        if any(w in q for w in ["send ", "email ", "delete", "assign"]):
+            return respond("I can answer questions about processed inbox data, but I cannot send emails or take external actions.", {})
+        if "gst refund" in q:
+            return respond("Zero processed emails were classified as GST refund requests.", {"gst_refund_count":0})
         if "spurious" in q:
-            s=compute_stats(cid); rate=(s["spurious_flagged"]/s["processed"] if s["processed"] else 0)
-            return {"answer":f"Spurious rate is {rate:.1%}: {s['spurious_flagged']} spurious tasks out of {s['processed']} processed emails.","supporting_data":{"spurious_count":s["spurious_flagged"],"processed":s["processed"],"spurious_rate":rate}}
+            s=compute_stats(cid)
+            data={"spurious_count":None,"processed":s["processed"],"spurious_rate":None,"note":s["spurious_note"]}
+            return respond(f"I do not track true spurious tasks yet because that requires human or evaluator labels. I processed {s['processed']} emails and tracked {s['skipped']} skipped noise emails separately.", data)
         if "triage" in q:
             rows=[rowdict(r) for r in con.execute("SELECT task_id,description,confidence,thread_id FROM tasks WHERE candidate_id=? AND category='triage'",(cid,))]
-            return {"answer":"Triage items: "+("; ".join(f"{r['task_id']} ({r['thread_id']}): {r['description']}" for r in rows) if rows else "none."),"supporting_data":{"triage_count":len(rows),"triage_task_ids":[r["task_id"] for r in rows]}}
+            data={"triage_count":len(rows),"triage_task_ids":[r["task_id"] for r in rows]}
+            return respond("Triage items: "+("; ".join(f"{r['task_id']} ({r['thread_id']}): {r['description']}" for r in rows) if rows else "none."), data)
         if "high" in q and "confidence" in q:
             rows=[rowdict(r) for r in con.execute("SELECT task_id,confidence,title FROM tasks WHERE candidate_id=? AND priority='high' AND confidence < 0.6",(cid,))]
-            return {"answer":f"Found {len(rows)} high-priority low-confidence tasks.","supporting_data":{"matches":rows}}
+            return respond(f"Found {len(rows)} high-priority low-confidence tasks.", {"matches":rows})
         if "deal value" in q:
             r=con.execute("SELECT SUM(deal_value_inr) total, SUM(CASE WHEN deal_value_inr IS NULL THEN 1 ELSE 0 END) missing FROM tasks WHERE candidate_id=? AND category='enterprise_rfp'",(cid,)).fetchone()
-            return {"answer":f"Total stated deal value for RFPs is ₹{r['total'] or 0:,}; {r['missing'] or 0} RFP tasks had no stated value.","supporting_data":{"total_deal_value_inr":r['total'] or 0,"rfps_with_no_stated_value":r['missing'] or 0}}
+            data={"total_deal_value_inr":r['total'] or 0,"rfps_with_no_stated_value":r['missing'] or 0}
+            return respond(f"Total stated deal value for RFPs is ₹{r['total'] or 0:,}; {r['missing'] or 0} RFP tasks had no stated value.", data)
         if "updated more than once" in q:
             rows=[r["thread_id"] for r in con.execute("SELECT thread_id FROM update_events WHERE candidate_id=? GROUP BY thread_id HAVING COUNT(*)>1",(cid,))]
-            return {"answer":f"Threads updated more than once: {', '.join(rows) if rows else 'none'}.","supporting_data":{"threads_updated_multiple_times":rows}}
+            return respond(f"Threads updated more than once: {', '.join(rows) if rows else 'none'}.", {"threads_updated_multiple_times":rows})
         if "alliance" in q:
             c=con.execute("SELECT COUNT(*) c FROM tasks WHERE candidate_id=? AND category='alliances'",(cid,)).fetchone()["c"]
-            return {"answer":f"There are {c} alliance emails. I do not store a reliable reseller-vs-integration sub-breakdown, so I will not guess.","supporting_data":{"alliances":c}}
+            return respond(f"There are {c} alliance emails. I do not store a reliable reseller-vs-integration sub-breakdown, so I will not guess.", {"alliances":c})
         cats={r["category"]:r["c"] for r in con.execute("SELECT category, COUNT(*) c FROM decisions WHERE candidate_id=? GROUP BY category",(cid,))}
         spam=con.execute("SELECT COUNT(*) c FROM decisions WHERE candidate_id=? AND action='skip'",(cid,)).fetchone()["c"]
-        return {"answer":f"Enterprise RFP: {cats.get('enterprise_rfp',0)}, marketing: {cats.get('marketing',0)}, skipped noise/spam: {spam}.","supporting_data":{"enterprise_rfp":cats.get('enterprise_rfp',0),"marketing":cats.get('marketing',0),"skipped_marketing_lookalike_spam":spam}}
+        data={"enterprise_rfp":cats.get('enterprise_rfp',0),"marketing":cats.get('marketing',0),"skipped_marketing_lookalike_spam":spam}
+        return respond(f"Enterprise RFP: {data['enterprise_rfp']}, marketing: {data['marketing']}, skipped noise/spam: {spam}.", data)
