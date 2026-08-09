@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json, os, re
-from dataclasses import dataclass, asdict
+import json, re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from dateutil import parser as dateparser
 from .models import Email
@@ -24,7 +24,7 @@ class Decision:
 SPAM = ["seo", "page 1", "free audit", "organic traffic", "unsubscribe", "newsletter", "issue #", "growth weekly", "out of office", "auto-reply", "automatic reply", "limited access to email", "circling back", "guest post"]
 RFP = ["rfp", "rfi", "tender", "proposal", "bid submission", "invites bids", "procurement"]
 PSU = ["bhel", "bharat heavy", "psu", "government", "govt", "ministry", "public sector", "municipal", "railways", "state electricity"]
-MARKETING = ["webinar", "sponsorship", "conference", "summit", "event", "pr", "media", "content collaboration", "co-host"]
+MARKETING = ["webinar", "sponsorship", "conference", "summit", "event", "media", "content collaboration", "co-host", "public relations"]
 ALLIANCE = ["reseller", "channel partner", "partner", "integration", "technology integration", "alliances", "partnership"]
 FINANCE = ["invoice", "gst", "gstin", "po-", "purchase order", "payment", "overdue", "vendor billing"]
 SMB = ["demo", "product enquiry", "trial", "pricing", "can we get", "quick call", "evaluate your platform", "product chahiye"]
@@ -35,15 +35,20 @@ def clean_text(email: Email) -> str:
     return f"{email.subject}\n{body}".lower()
 
 def parse_money(text: str, finance_context=False) -> int | None:
-    if finance_context and re.search(r"invoice|payment|gst|po-|purchase order", text):
+    if finance_context and re.search(r"invoice|payment|gst|po-|purchase order", text, re.I):
         return None
-    m = re.search(r"(?:rs\.?|₹|inr)?\s*([0-9][0-9,]*(?:\.\d+)?)\s*(cr|crore|crores|lakh|lakhs|lac|lacs|k)?", text, re.I)
-    if not m: return None
-    n = float(m.group(1).replace(",", "")); unit = (m.group(2) or "").lower()
-    if unit in {"cr","crore","crores"}: n *= 10000000
-    elif unit in {"lakh","lakhs","lac","lacs"}: n *= 100000
-    elif unit == "k": n *= 1000
-    return int(n)
+    money_pattern = re.compile(r"(?P<currency>rs\.?|₹|inr)?\s*(?P<amount>[0-9][0-9,]*(?:\.\d+)?)\s*(?P<unit>cr|crore|crores|lakh|lakhs|lac|lacs|k)?", re.I)
+    for m in money_pattern.finditer(text):
+        unit = (m.group("unit") or "").lower()
+        has_currency = bool(m.group("currency"))
+        if not has_currency and not unit:
+            continue
+        n = float(m.group("amount").replace(",", ""))
+        if unit in {"cr", "crore", "crores"}: n *= 10000000
+        elif unit in {"lakh", "lakhs", "lac", "lacs"}: n *= 100000
+        elif unit == "k": n *= 1000
+        return int(n)
+    return None
 
 def parse_due(text: str, received_at: str) -> str | None:
     base = dateparser.parse(received_at)
@@ -76,6 +81,16 @@ def priority(text: str, received_at: str, due: str | None) -> str:
     if re.search(r"nothing urgent|sometime next week", text, re.I): return "low"
     return "medium"
 
+def has_any(text: str, terms: list[str]) -> bool:
+    return any(term in text for term in terms)
+
+def has_marketing_signal(raw: str, text: str) -> bool:
+    if has_any(text, MARKETING):
+        return True
+    # Keep PR/public-relations support without matching the substring inside
+    # enterprise, proposal, process, product, approximate, etc.
+    return bool(re.search(r"(?<![A-Za-z])PR(?![A-Za-z])", raw))
+
 def route_email(email: Email) -> Decision:
     text = clean_text(email); raw = f"{email.subject}\n{email.body}"
     spam_hit = any(s in text for s in SPAM)
@@ -84,7 +99,7 @@ def route_email(email: Email) -> Decision:
         return Decision(action="skip", skip_reason="noise", confidence=0.93, reasoning=reason)
     due = parse_due(raw, email.received_at); fin = any(k in text for k in FINANCE)
     value = parse_money(raw, finance_context=fin); comp = company(email, text)
-    signals = {"rfp": any(k in text for k in RFP), "marketing": any(k in text for k in MARKETING), "alliances": any(k in text for k in ALLIANCE), "finance": fin, "smb": any(k in text for k in SMB)}
+    signals = {"rfp": has_any(text, RFP), "marketing": has_marketing_signal(raw, text), "alliances": has_any(text, ALLIANCE), "finance": fin, "smb": has_any(text, SMB)}
     if sum(signals.values()) > 1 and not signals["finance"] and "invoice" not in text:
         return Decision("task", "Ambiguous inbound request", "Multiple ownership signals detected; human review needed.", "u_triage", "triage", priority(text,email.received_at,due), due, value, comp, 0.42, reasoning=json.dumps(signals))
     if signals["finance"]:

@@ -19,5 +19,5 @@ I used 50 synthetic-but-realistic emails modelled on the assignment examples bec
 ## Failure Cases I Did Not Fix
 
 1. A vague "strategic collaboration" email from a services firm can be routed to alliances even if it is actually vendor spam.
-2. A reply that only says "approved, proceed by Friday" may update priority but not preserve the earlier explicit budget if the new body lacks it.
+2. A reply that says only "approved, proceed by Friday" now preserves old due date/value, but may still miss the new relative Friday date unless it is phrased as a clearer deadline.
 3. Company extraction from heavily quoted forwarded threads can return null even when a company appears in the quoted section.

@@ -85,7 +85,22 @@ def ingest(req: IngestRequest):
                 if decision.action == "skip": stats["skipped"] += 1
                 elif existing:
                     task_id = existing["task_id"]; stats["tasks_updated"] += 1
-                    fields = {"source_email_id": email.email_id, "title": decision.title, "description": decision.description, "assignee_id": decision.assignee_id, "category": decision.category, "priority": decision.priority, "due_date": decision.due_date, "deal_value_inr": decision.deal_value_inr, "company_name": decision.company_name, "confidence": decision.confidence, "updated_at": now()}
+                    confident_route = decision.category != "triage" or existing["category"] == "triage" or decision.confidence >= 0.6
+                    fields = {"source_email_id": email.email_id, "updated_at": now()}
+                    if confident_route:
+                        fields.update({
+                            "title": decision.title,
+                            "description": decision.description,
+                            "assignee_id": decision.assignee_id,
+                            "category": decision.category,
+                            "confidence": decision.confidence,
+                        })
+                    if decision.priority == "high" or confident_route:
+                        fields["priority"] = decision.priority
+                    for field in ("due_date", "deal_value_inr", "company_name"):
+                        value = getattr(decision, field)
+                        if value is not None:
+                            fields[field] = value
                     con.execute("UPDATE tasks SET " + ",".join(f"{k}=?" for k in fields) + " WHERE task_id=?", [*fields.values(), task_id])
                     con.execute("INSERT INTO update_events(candidate_id,thread_id,task_id,source_email_id,created_at) VALUES (?,?,?,?,?)", (req.candidate_id,email.thread_id,task_id,email.email_id,now()))
                 else:

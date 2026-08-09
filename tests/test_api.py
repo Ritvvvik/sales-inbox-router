@@ -15,3 +15,16 @@ def test_ingest_idempotent_and_chat_zero():
  assert client.post('/ingest',json={'candidate_id':CID,'emails':batch}).json()['tasks_created']==0
  assert len(client.get('/tasks',params={'candidate_id':CID}).json())==1
  assert client.post('/api/chat',json={'candidate_id':CID,'query':'How many emails were about GST refunds?'}).json()['supporting_data']['gst_refund_count']==0
+
+
+def test_thread_reply_does_not_clobber_existing_due_date_or_value():
+ batch=[email(10,'RFP','RFP for platform budget Rs. 25 lakhs deadline 12 Aug 2026','th_keep')]
+ assert client.post('/ingest',json={'candidate_id':CID,'emails':batch}).json()['tasks_created']==1
+ reply=[email(11,'Re: RFP','Just checking in, any updates?','th_keep')]
+ reply[0]['is_reply']=True
+ assert client.post('/ingest',json={'candidate_id':CID,'emails':reply}).json()['tasks_updated']==1
+ task=client.get('/tasks',params={'candidate_id':CID,'thread_id':'th_keep'}).json()[0]
+ assert task['category']=='enterprise_rfp'
+ assert task['assignee_id']=='u_aarti'
+ assert task['deal_value_inr']==2500000
+ assert task['due_date']=='2026-08-12'
