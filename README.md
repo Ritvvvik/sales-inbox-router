@@ -89,7 +89,54 @@ The chat flow is deliberately grounded:
 
 If the user asks for an unsupported action, such as sending an email, the chat endpoint refuses. If the user asks for a category with zero matches, it returns zero instead of inventing activity.
 
-## Setup (backend in 3 commands)
+
+## Whole agentic flow diagram
+
+The system is intentionally split into a deterministic routing core plus an auditable chat layer. The browser never sees secrets and never writes directly to the raw Task API; it talks only to the backend.
+
+```mermaid
+flowchart TD
+    A[Ops user pastes or generates email JSON in frontend] --> B[Frontend renders raw email table before routing]
+    B --> C[User clicks Route displayed batch]
+    C --> D[POST /ingest with candidate_id and emails]
+
+    D --> E[Backend validates candidate_id and batch size]
+    E --> F[For each email: strip quoted reply text and extract signals]
+    F --> G{Noise? OOO / newsletter / vendor spam}
+    G -- yes --> H[Store skipped decision in decisions table]
+    G -- no --> I[Classify category and assignee]
+
+    I --> J[Extract due_date, deal_value_inr, company_name, priority, confidence]
+    J --> K{Existing task for candidate_id + thread_id?}
+    K -- no --> L[Create task in tasks table]
+    K -- yes --> M[Merge update into existing task without clobbering non-null prior facts]
+    M --> N[Record update_events history]
+    L --> O[Store decision row for the email]
+    N --> O
+    H --> P[Return processed / created / updated / skipped summary]
+    O --> P
+
+    Q[Ops user asks question in chat] --> R[POST /api/chat]
+    R --> S[Map question to supported structured query intent]
+    S --> T[Query tasks + decisions + update_events]
+    T --> U[Return answer plus supporting_data]
+    U --> V[Frontend displays answer and auditable JSON support]
+```
+
+### Flow in plain English
+
+1. The operator pastes emails or generates sample emails.
+2. The frontend shows the raw email table first, before routing, so the operator can inspect exactly what is being processed.
+3. The frontend sends the batch to `POST /ingest`.
+4. The backend processes every email synchronously.
+5. Spam, newsletters, and out-of-office replies are stored as skipped decisions, not tasks.
+6. Real business emails become tasks or update existing thread tasks.
+7. Every email gets a stored decision row so chat and stats are based on saved ground truth.
+8. Chat questions are answered from database queries and include `supporting_data`, so counts can be checked.
+
+## How to run this code locally
+
+### 1. Start the backend
 
 ```bash
 cp .env.example .env
@@ -97,9 +144,22 @@ pip install -r requirements-dev.txt
 uvicorn backend.main:app --reload
 ```
 
-The backend will run at `http://localhost:8000` by default.
+Backend URL:
 
-## Run the frontend
+```text
+http://localhost:8000
+```
+
+Quick backend checks:
+
+```bash
+curl http://localhost:8000/health
+curl http://localhost:8000/users
+```
+
+### 2. Start the frontend
+
+Open a second terminal:
 
 ```bash
 cd frontend
@@ -107,7 +167,33 @@ npm install
 VITE_BACKEND_URL=http://localhost:8000 npm run dev
 ```
 
-The frontend will print a local Vite URL in the terminal.
+Then open the Vite URL printed in the terminal, usually:
+
+```text
+http://localhost:5173
+```
+
+### 3. Try the full workflow
+
+In the frontend:
+
+1. Click **Generate 250 sample emails**.
+2. Confirm the raw table appears.
+3. Click **Route displayed batch**.
+4. Ask a chat question, for example:
+   - `How many marketing versus RFP emails came in?`
+   - `Show me everything sitting in triage and why.`
+   - `How many emails were about GST refunds?`
+
+### 4. Run checks
+
+```bash
+python -m py_compile backend/*.py tests/*.py
+pytest -q
+```
+
+If dependency installation is blocked by your network, install the packages from `requirements-dev.txt` in a Python environment with package-index access and rerun the same commands.
+
 
 ## Environment variables
 
