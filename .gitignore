@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+router.db
+*.sqlite
+.DS_Store
+node_modules/
+frontend/dist/
