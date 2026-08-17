@@ -1,11 +1,8 @@
 # Sales Inbox → Task Router
 
-**candidate_id:** `replace.with.your.real.email@example.com`  
-**Backend URL:** `https://your-backend.example.com`  
-**Frontend URL:** `https://your-frontend.example.com`  
-**Public GitHub repo:** `https://github.com/your-user/sales-inbox-router`
-
-> Replace the placeholder URLs above with the deployed backend, deployed frontend, and public GitHub repository URLs before submission. Before submission, replace `replace.with.your.real.email@example.com` with your real email everywhere and keep the `candidate_id` byte-identical across README, `.env`, frontend requests, backend requests, and the submission form.
+**candidate_id:** `ritvikk365@gmail.com`  
+**Backend URL:** `https://sales-inbox-router-lref.onrender.com`  
+**Frontend URL:** `https://sales-inbox-router-rho.vercel.app/`  
 
 ## Why this exists
 
@@ -19,7 +16,7 @@ This project turns the inbox into a routed task stream:
 4. **The operator can inspect decisions.** Every processed email is stored with a decision, confidence, and reasoning so the frontend and chat interface can explain what happened.
 5. **Chat answers are grounded in stored data.** The chat endpoint computes counts and lists from the database first, then returns `supporting_data` beside the answer so numbers are auditable.
 
-## What we built
+## What I built
 
 ### Backend API
 
